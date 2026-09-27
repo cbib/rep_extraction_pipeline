@@ -5,6 +5,8 @@
 # Date: 2025-11-06
 
 import os
+import hashlib
+import json
 from pathlib import Path
 
 
@@ -26,6 +28,8 @@ wildcard_constraints:
 # ============================================================================
 THREADS = config.get("threads", 4)
 N_CHUNKS = config.get("n_chunks", 1)
+if isinstance(N_CHUNKS, bool) or not isinstance(N_CHUNKS, int) or N_CHUNKS < 1:
+    raise ValueError("n_chunks must be a positive integer")
 CHUNKS = list(range(N_CHUNKS))
 
 # Input files
@@ -35,6 +39,9 @@ GENCODE_FASTA = config.get("gencode_fasta", "")  # Full transcript FASTA (option
 
 # Classification approach
 CLASSIFICATION_MODE = config.get("classification_mode", "fasta")  # "fasta" or "id_file"
+
+if CLASSIFICATION_MODE not in {"fasta", "id_file"}:
+    raise ValueError("classification_mode must be fasta or id_file")
 
 # Conditional inputs based on classification mode
 if CLASSIFICATION_MODE == "fasta":
@@ -50,6 +57,8 @@ RM_SPECIES = config.get("repeatmasker_species", "human")
 # Sequence mode: "spliced" (exonic FASTA) or "unspliced" (full genomic span via bedtools getfasta)
 SEQUENCE_MODE = config.get("sequence_mode", "spliced")
 GENOME_FASTA = config.get("genome_fasta", "")
+if SEQUENCE_MODE not in {"spliced", "unspliced"}:
+    raise ValueError("sequence_mode must be spliced or unspliced")
 
 # ============================================================================
 # Validation and setup
@@ -127,39 +136,50 @@ if SOURCE_GTF:
     _pc_input   = PC_TRANSCRIPTS_FA   if CLASSIFICATION_MODE == "fasta" else PC_TRANSCRIPT_IDS
     _lnc_input  = LNCRNA_TRANSCRIPTS_FA if CLASSIFICATION_MODE == "fasta" else LNCRNA_TRANSCRIPT_IDS
 
+    _subset_key = hashlib.sha256(json.dumps([os.path.abspath(p) for p in
+        (GENCODE_GTF, SOURCE_GTF, _pc_input, _lnc_input)] + [CLASSIFICATION_MODE]).encode()).hexdigest()[:16]
+    SUBSET_IDS = f"resources/annotation/subset_transcript_ids.{_subset_key}.txt"
+
     rule extract_fasta_ids_for_subset:
         """Collect transcript IDs from classification inputs for GTF subsetting."""
         input:
             pc=_pc_input,
             lncrna=_lnc_input,
         output:
-            ids="resources/annotation/subset_transcript_ids.txt",
+            ids=SUBSET_IDS,
         log:
-            "logs/subset_gtf/extract_ids.log",
+            f"logs/subset_gtf/{_subset_key}.extract_ids.log",
         run:
-            if CLASSIFICATION_MODE == "fasta":
-                shell(
-                    "grep -h '^>' {input.pc} {input.lncrna} | "
-                    "sed 's/^>//; s/|.*//' | sort -u > {output.ids} 2>&1 | tee {log}"
-                )
-            else:
-                shell("sort -u {input.pc} {input.lncrna} > {output.ids} 2>&1 | tee {log}")
+            ids = set()
+            for source in (input.pc, input.lncrna):
+                with open(source) as handle:
+                    for line in handle:
+                        if CLASSIFICATION_MODE == "fasta":
+                            if line.startswith(">"):
+                                ids.add(line[1:].split()[0].split("|")[0])
+                        elif line.strip():
+                            ids.add(line.strip())
+            with open(output.ids, "w") as handle:
+                handle.writelines(identifier + "\n" for identifier in sorted(ids))
+            Path(log[0]).write_text(f"Collected {len(ids)} transcript IDs\n")
 
     rule subset_gtf:
         """Filter full GTF to only transcripts present in the classification inputs."""
         input:
             gtf=SOURCE_GTF,
-            ids="resources/annotation/subset_transcript_ids.txt",
+            ids=SUBSET_IDS,
         output:
             gtf=GENCODE_GTF,
+        conda:
+            "workflow/envs/te_analysis.yaml"
         log:
-            "logs/subset_gtf/subset_gtf.log",
+            f"logs/subset_gtf/{_subset_key}.subset_gtf.log",
         shell:
             r"""
             awk -F'\t' 'BEGIN {{ while ((getline id < "{input.ids}") > 0) ids[id]=1 }}
                  /^#/ {{ print; next }}
                  match($9, /transcript_id "([^"]+)"/, a) && a[1] in ids {{ print }}' \
-              {input.gtf} > {output.gtf} 2>&1 | tee {log}
+              {input.gtf:q} > {output.gtf:q} 2> {log:q}
             """
 
 rule create_subset_gtf:
@@ -212,7 +232,7 @@ rule extract_transcript_lengths:
     run:
         if SEQUENCE_MODE == "unspliced":
             # ponytail: col4=transcript_id, end-start gives genomic span (BED is 0-based)
-            shell("awk '{{print $4 \"\\t\" $3-$2}}' {input.bed} > {output.lengths} 2>&1 | tee {log}")
+            shell("awk '{{print $4 \"\\t\" $3-$2}}' {input.bed:q} > {output.lengths:q} 2> {log:q}")
         else:
             shell(
                 """
@@ -221,7 +241,7 @@ rule extract_transcript_lengths:
                     L[arr[1]] += $5 - $4 + 1
                 }} END {{
                     for (t in L) print t "\\t" L[t]
-                }}' {input.gtf} > {output.lengths} 2>&1 | tee {log}
+                }}' {input.gtf:q} > {output.lengths:q} 2> {log:q}
                 """
             )
 
@@ -233,8 +253,8 @@ rule extract_transcript_lengths:
 rule extract_ids_from_fasta:
     """Extract transcript IDs from FASTA files (FASTA mode)."""
     input:
-        pc_fa=PC_TRANSCRIPTS_FA if CLASSIFICATION_MODE == "fasta" else [],
-        lncrna_fa=LNCRNA_TRANSCRIPTS_FA if CLASSIFICATION_MODE == "fasta" else [],
+        pc_fa=PC_TRANSCRIPTS_FA if CLASSIFICATION_MODE == "fasta" else PC_TRANSCRIPT_IDS,
+        lncrna_fa=LNCRNA_TRANSCRIPTS_FA if CLASSIFICATION_MODE == "fasta" else LNCRNA_TRANSCRIPT_IDS,
     output:
         pc_ids="results/{dataset}/annotation/pc_transcript_ids.txt",
         lncrna_ids="results/{dataset}/annotation/lncrna_transcript_ids.txt",
@@ -259,8 +279,8 @@ rule extract_ids_from_fasta:
             )
         else:
             # If using ID file mode, just copy the files
-            shell("cp {PC_TRANSCRIPT_IDS} {output.pc_ids}")
-            shell("cp {LNCRNA_TRANSCRIPT_IDS} {output.lncrna_ids}")
+            shell("cp {input.pc_fa:q} {output.pc_ids:q}")
+            shell("cp {input.lncrna_fa:q} {output.lncrna_ids:q}")
 
 
 # ============================================================================
@@ -270,6 +290,7 @@ rule prepare_transcript_fasta:
     """Create all_transcripts.fa: symlink spliced FASTA or extract unspliced sequences."""
     input:
         bed="results/{dataset}/annotation/transcripts_from_gtf.bed",
+        sequence=GENOME_FASTA if SEQUENCE_MODE == "unspliced" else GENCODE_FASTA,
     output:
         fa="results/{dataset}/annotation/all_transcripts.fa",
     conda:
@@ -279,17 +300,11 @@ rule prepare_transcript_fasta:
     run:
         if SEQUENCE_MODE == "unspliced":
             shell(
-                "bedtools getfasta -fi {GENOME_FASTA} -bed {input.bed}"
+                "bedtools getfasta -fi {input.sequence:q} -bed {input.bed}"
                 " -nameOnly -s -fo {output.fa} 2>&1 | tee {log}"
             )
         else:
-            shell("ln -sf $(realpath {GENCODE_FASTA}) {output.fa} 2>&1 | tee {log}")
-
-# TODO: bedtools getfasta appends strand information to the fasta ID header. We need to remove it
-#             shell(
-#                "bedtools getfasta -fi {GENOME_FASTA} -bed {input.bed}"
-#                " -nameOnly -s 2>{log} | sed 's/([+-])$//' > {output.fa}"
-#            )
+            shell("ln -sf $(realpath {input.sequence:q}) {output.fa} 2>&1 | tee {log}")
 
 # ============================================================================
 # Step 3: Index and prepare for RepeatMasker
@@ -342,6 +357,8 @@ rule split_fasta_for_repeatmasker:
         "logs/{dataset}/split_fasta.log",
     run:
         total = sum(1 for line in open(input.fa) if line.startswith('>'))
+        if total == 0:
+            raise ValueError("Transcript FASTA contains no sequences")
         chunk_size = (total + N_CHUNKS - 1) // N_CHUNKS
         handles = [open(p, 'w') for p in output]
         idx, seq_count = 0, 0
@@ -362,6 +379,7 @@ rule run_repeatmasker_chunk:
     """Run RepeatMasker on one FASTA chunk."""
     input:
         fa="results/{dataset}/repeatmasker/chunks/chunk_{chunk}.fa",
+        helper="workflow/scripts/repeatmasker_outputs.py",
     output:
         gff="results/{dataset}/repeatmasker/chunks/chunk_{chunk}.out.gff",
         out="results/{dataset}/repeatmasker/chunks/chunk_{chunk}.out",
@@ -380,51 +398,19 @@ rule run_repeatmasker_chunk:
         "benchmarks/{dataset}/repeatmasker_chunk_{chunk}.txt",
     shell:
         """
-        RepeatMasker \
-            -species {params.species} \
-            -pa {threads} \
-            -gff \
-            -dir {params.outdir} \
-            -s \
-            {input.fa} \
-            2>&1 | tee {log}
-
-        mv {params.outdir}/$(basename {input.fa}).out.gff {output.gff}
-        mv {params.outdir}/$(basename {input.fa}).out {output.out}
-        """
-
-
-rule resume_repeatmasker_from_cat:
-    """Resume RepeatMasker from a pre-built .cat.gz (e.g. after SLURM timeout)."""
-    input:
-        cat="RM_2996657.MonJun221725172026/all_transcripts_headers_checked.fa.cat.gz",
-        fa="RM_2996657.MonJun221725172026/all_transcripts_headers_checked.fa",
-    output:
-        out="results/{dataset}/repeatmasker/all_transcripts.recovered.out",
-        gff="results/{dataset}/repeatmasker/all_transcripts.recovered.out.gff",
-    params:
-        species=RM_SPECIES,
-        rm_dir="RM_2996657.MonJun221725172026",
-        base="all_transcripts_headers_checked.fa",
-    conda:
-        "workflow/envs/te_analysis.yaml"
-    resources:
-        mem_mb=46000,
-        runtime="2d",
-    log:
-        "logs/{dataset}/resume_repeatmasker.log",
-    shell:
-        """
-        cd {params.rm_dir}
-        ProcessRepeats \
-            -species {params.species} \
-            -gff \
-            -maskSource {params.base} \
-            {params.base}.cat.gz \
-            2>&1 | tee ../{log}
-        cd ..
-        cp {params.rm_dir}/{params.base}.out {output.out}
-        cp {params.rm_dir}/{params.base}.out.gff {output.gff}
+        if [ -s {input.fa:q} ]; then
+            # Do not mistake stale raw files for successful output on a rerun.
+            rm -f -- {input.fa:q}.out {input.fa:q}.out.gff
+            RepeatMasker -species {params.species:q} -pa {threads} -gff \
+                -dir {params.outdir:q} -s {input.fa:q} 2>&1 | tee {log:q}
+            python {input.helper:q} normalize \
+                --raw-out {input.fa:q}.out --raw-gff {input.fa:q}.out.gff \
+                --out {output.out:q} --gff {output.gff:q}
+        else
+            echo "Empty chunk: no RepeatMasker execution needed" > {log:q}
+            python {input.helper:q} normalize --empty \
+                --out {output.out:q} --gff {output.gff:q}
+        fi
         """
 
 
@@ -433,6 +419,7 @@ rule merge_repeatmasker_chunks:
     input:
         gffs=expand("results/{{dataset}}/repeatmasker/chunks/chunk_{chunk}.out.gff", chunk=CHUNKS),
         outs=expand("results/{{dataset}}/repeatmasker/chunks/chunk_{chunk}.out", chunk=CHUNKS),
+        helper="workflow/scripts/repeatmasker_outputs.py",
     output:
         gff="results/{dataset}/repeatmasker/all_transcripts.out.gff",
         out="results/{dataset}/repeatmasker/all_transcripts.out",
@@ -440,18 +427,13 @@ rule merge_repeatmasker_chunks:
         n_chunks=N_CHUNKS,
     log:
         "logs/{dataset}/merge_repeatmasker.log",
+    conda:
+        "workflow/envs/te_analysis.yaml"
     shell:
         """
-        # .out: 3-line header from first chunk, data rows from all chunks
-        head -3 {input.outs[0]} > {output.out}
-        for f in {input.outs}; do
-            tail -n +4 "$f" >> {output.out}
-        done
-
-        # .gff: concatenate all (repeated ## metadata is harmless for downstream use)
-        cat {input.gffs} > {output.gff}
-
-        echo "Merged {params.n_chunks} chunk(s) into {output.out}" 2>&1 | tee {log}
+        python {input.helper:q} merge \
+            --outs {input.outs:q} --gffs {input.gffs:q} \
+            --out {output.out:q} --gff {output.gff:q} 2>&1 | tee {log:q}
         """
 
 
@@ -618,4 +600,4 @@ rule clean:
 
 rule pipeline_all_features:
     input:
-        expand(rules.extract_all_features.input[0], dataset=DATASETS),
+        expand(rules.extract_all_features.output.features, dataset=DATASETS),

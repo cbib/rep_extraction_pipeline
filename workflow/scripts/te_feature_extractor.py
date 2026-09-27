@@ -1200,7 +1200,20 @@ class GlobalRepeatProcessor(RepeatMaskerProcessor):
 
         if self.rm_hits.empty:
             logger.warning("No RM hits found!")
-            return pd.DataFrame(columns=["transcript_id"])
+            # Keep the global schema even when an entire input has no hits.
+            # This follows the zero-fill convention used for hit-free transcripts
+            # in a mixed input and keeps presence/count analyses well-defined.
+            features = self.transcripts[["transcript_id"]].copy()
+            for column in (
+                "global_rm_count",
+                "global_rm_total_length",
+                "global_gaps_mean",
+                "global_gaps_median",
+                "global_gaps_max",
+                "global_gaps_min",
+            ):
+                features[column] = 0
+            return features
 
         # Calculate basic metrics on ALL hits
         all_hits = self.calculate_hit_lengths(self.rm_hits)
@@ -1427,10 +1440,10 @@ class TEFeatureExtractor:
             usecols=[0, 1, 2, 3, 4, 5],
         )
 
-        # Override genomic-span lengths with GTF-derived spliced lengths if provided
+        # Use lengths for the selected sequence mode: exon sum or genomic span.
         if self.lengths_file:
             logger.info(
-                f"Loading pre-calculated spliced lengths from {self.lengths_file}"
+                f"Loading pre-calculated transcript lengths from {self.lengths_file}"
             )
             gtf_lengths = pd.read_csv(
                 self.lengths_file,
@@ -1453,13 +1466,13 @@ class TEFeatureExtractor:
             overridden = mapped.notna().sum()
             logger.info(
                 f"Overriding lengths for {overridden}/{len(self.transcripts)} transcripts "
-                "with GTF-derived spliced lengths"
+                "with mode-specific GTF-derived lengths"
             )
             self.transcripts["length"] = mapped
         else:
             # TODO: properly configure object so that lengths_file is required
             raise ValueError(
-                "lengths_file is required to ensure accurate TE coverage calculations relative to spliced transcript lengths. Please provide the output of extract_transcript_lengths."
+                "lengths_file is required to ensure accurate TE coverage calculations relative to the selected sequence mode. Please provide the output of extract_transcript_lengths."
             )
 
         # Map transcript lengths to RM hits
@@ -1767,7 +1780,7 @@ Examples:
         "--lengths",
         required=False,
         default=None,
-        help="TSV file with pre-calculated spliced transcript lengths "
+        help="TSV file with mode-specific transcript lengths (exon sum for spliced, genomic span for unspliced) "
         "(transcript_id<TAB>length), produced by extract_transcript_lengths",
     )
     parser.add_argument("--output-prefix", required=True, help="Output file prefix")
