@@ -5,11 +5,13 @@ channels:
 dependencies:
   - python=3.12
   - scipy
+  - statsmodels
+  - gawk
   - matplotlib
   - numpy
   - scikit-learn
   - seaborn
-  - pandas
+  - pandas>=2.3,<3
   - samtools
   - bedtools
   - tqdm
