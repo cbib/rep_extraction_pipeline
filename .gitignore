@@ -4,6 +4,7 @@
 .snakejob.*
 
 # Workflow outputs and run artifacts
+/RM_*/
 results/
 logs/
 benchmarks/
