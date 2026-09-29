@@ -19,6 +19,7 @@ workflow/notebooks/cache/
 # Locally downloaded reference data and installed tools
 resources/
 software/
+config/*.local.yaml
 
 # Other result files
 *.tsv

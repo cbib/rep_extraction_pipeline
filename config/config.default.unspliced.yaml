@@ -1,0 +1,62 @@
+# Configuration - TE analysis of unspliced GENCODE v47 transcripts
+# Copy to a local config and replace paths with your matching input files.
+
+# ============================================================================
+# General settings
+# ============================================================================
+
+threads: 20
+# Number of FASTA chunks for parallel RepeatMasker; 1 disables chunking.
+# Each chunk requests up to `threads` cores.
+n_chunks: 8
+datasets:
+  - "gencode.v47"
+
+# Sequence mode for RepeatMasker input:
+# "spliced" uses a supplied mature transcript FASTA directly.
+# "unspliced" extracts full genomic transcript spans, including introns.
+sequence_mode: "unspliced"
+
+# ============================================================================
+# REQUIRED: GENCODE annotation and sequence paths
+# ============================================================================
+
+# Full GENCODE v47 GTF: https://www.gencodegenes.org/human/release_47.html
+# The workflow selects the classification IDs from source_gtf into gencode_gtf.
+# It uses that subset to identify transcript spans in the genome for RepeatMasker.
+source_gtf: "resources/annotation/gencode.v47.annotation.gtf"
+gencode_gtf: "resources/annotation/gencode.v47.annotation.unspliced.subset.gtf"
+
+# Matching genome FASTA; GTF and genome contig names must agree.
+genome_fasta: "resources/genome/GRCh38.primary_assembly.genome.fa"
+
+# ============================================================================
+# Classification mode: choose ONE
+# ============================================================================
+
+# "fasta": separate coding and lncRNA FASTAs; "id_file": one ID per line.
+classification_mode: "fasta"
+
+# ============================================================================
+# Option A: FASTA-based classification
+# ============================================================================
+
+# These FASTAs select the GTF subset and label transcripts for comparisons.
+# Their sequences are NOT the unspliced RepeatMasker input; only IDs are read.
+pc_transcripts_fasta: "resources/transcripts/gencode.v47.pc_transcripts.fa"
+lncrna_transcripts_fasta: "resources/transcripts/gencode.v47.lncRNA_transcripts.fa"
+
+# ============================================================================
+# Option B: ID file-based classification
+# ============================================================================
+
+# To use ID files instead, set classification_mode: "id_file" and supply both:
+# pc_transcript_ids_file: "resources/ids/pc_transcript_ids.txt"
+# lncrna_transcript_ids_file: "resources/ids/lncrna_transcript_ids.txt"
+
+# ============================================================================
+# RepeatMasker settings
+# ============================================================================
+
+repeatmasker_species: "human"
+# RepeatMasker's installed library controls the run; repeatmasker_lib is unused.
