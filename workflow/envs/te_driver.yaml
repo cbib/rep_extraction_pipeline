@@ -1,0 +1,9 @@
+name: te_driver
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - snakemake-minimal>=9,<10
+  # combine_classified_features uses a Snakemake run block in the driver.
+  - pandas>=2.3,<3

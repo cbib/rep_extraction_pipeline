@@ -8,34 +8,33 @@
 # General settings
 # ============================================================================
 
-output_dir: "results/gencode.v49"
-threads: 28
+threads: 20
 datasets:
-  - "gencode.v49"
-
-# TODO: refactor to have datasets-specific settings
+  - "gencode.v47.bis"
+n_chunks: 8
 
 # ============================================================================
 # REQUIRED: GENCODE annotation
 # ============================================================================
 
-# GENCODE v49 GTF annotation file
-# Download from: https://www.gencodegenes.org/human/release_49.html
-# File: gencode.v49.annotation.gtf or gencode.v49.basic.annotation.gtf
-gencode_gtf: "resources/annotation/gencode.v49.chr_patch_hapl_scaff.annotation.gtf"
+# GENCODE v47 GTF annotation file
+# Download from: https://www.gencodegenes.org/human/release_47.html
+# File: gencode.v47.annotation.gtf or gencode.v47.basic.annotation.gtf
+gencode_gtf: "resources/annotation/gencode.v47.annotation.subset.gtf"
+source_gtf: "resources/annotation/gencode.v47.annotation.gtf"
 
 # Optional: Full transcript FASTA extracted from GTF
 # If not provided, will be extracted from genome (requires genome FASTA)
 # If provided, uses this directly (faster)
-gencode_fasta: "resources/transcripts/gencode.v49.transcripts.fa"
+gencode_fasta: "resources/transcripts/gencode.v47.transcripts.fa"
 
 # Sequence mode for RepeatMasker input:
 #   "spliced"   - use exonic sequences from gencode_fasta (default)
 #   "unspliced" - extract full genomic span (TSS→TES, introns included) via bedtools getfasta
-sequence_mode: "spliced"
+sequence_mode: "unspliced"
 
 # Required only for sequence_mode: "unspliced"
-genome_fasta: ""  # e.g. "resources/genome/GRCh38.primary_assembly.genome.fa"
+genome_fasta: "resources/genome/GRCh38.primary_assembly.genome.fa"  # e.g. "resources/genome/GRCh38.primary_assembly.genome.fa"
 
 # ============================================================================
 # Classification mode: choose ONE
@@ -53,8 +52,8 @@ classification_mode: "fasta"  # Change to "id_file" if using ID files
 # Use these if classification_mode: "fasta"
 # Provide separate FASTA files for coding and lncRNA transcripts
 
-pc_transcripts_fasta: "resources/transcripts/gencode.v49.pc_transcripts.fa"
-lncrna_transcripts_fasta: "resources/transcripts/gencode.v49.lncRNA_transcripts.fa"
+pc_transcripts_fasta: "resources/transcripts/gencode.v47.pc_transcripts.fa"
+lncrna_transcripts_fasta: "resources/transcripts/gencode.v47.lncRNA_transcripts.fa"
 
 # ============================================================================
 # Option B: ID file-based classification
@@ -63,8 +62,8 @@ lncrna_transcripts_fasta: "resources/transcripts/gencode.v49.lncRNA_transcripts.
 # Use these if classification_mode: "id_file"
 # Simple text files with transcript IDs (one per line, without .version)
 
-pc_transcript_ids_file: "resources/ids/pc_transcript_ids_49.txt"
-lncrna_transcript_ids_file: "resources/ids/lncrna_transcript_ids_49.txt"
+pc_transcript_ids_file: "resources/ids/pc_transcript_ids.txt"
+lncrna_transcript_ids_file: "resources/ids/lncrna_transcript_ids.txt"
 
 # ============================================================================
 # RepeatMasker settings

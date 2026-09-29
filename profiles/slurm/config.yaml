@@ -1,0 +1,19 @@
+# Requires workflow/envs/te_driver_slurm.yaml. Set site account/partition separately.
+executor: slurm
+jobs: 30
+keep-going: false
+printshellcmds: true
+scheduler: greedy
+use-conda: true
+latency-wait: 45
+benchmark-extended: true
+slurm-keep-successful-logs: true
+set-resources:
+  extract_all_features:
+    runtime: 60
+    mem_mb: 100000
+  run_repeatmasker_chunk:
+    mem_mb: 46000
+    runtime: 4320
+  generate_visualizations:
+    runtime: 30
